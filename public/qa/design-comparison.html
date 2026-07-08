@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Design Comparison</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f3f6fa;
+        font-family: Inter, "PingFang SC", system-ui, sans-serif;
+        color: #1f2a3a;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        padding: 16px;
+      }
+      .panel {
+        background: white;
+        border: 1px solid #dfe7f1;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      h1 {
+        margin: 0;
+        padding: 12px 14px;
+        font-size: 15px;
+        border-bottom: 1px solid #e8edf4;
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="grid">
+      <section class="panel">
+        <h1>Source B3 Visual Direction</h1>
+        <img src="/qa/source-b3.png" />
+      </section>
+      <section class="panel">
+        <h1>Implemented Prototype</h1>
+        <img src="/qa/prototype-screenshot.png" />
+      </section>
+    </div>
+  </body>
+</html>
