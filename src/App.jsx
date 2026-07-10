@@ -81,6 +81,33 @@ function inferApiModeForModel(model) {
   return "";
 }
 
+async function readApiPayload(response) {
+  const text = await response.text();
+
+  try {
+    return {
+      payload: text ? JSON.parse(text) : {},
+      rawText: text,
+    };
+  } catch {
+    const looksLikeHtml = /^\s*</.test(text);
+    const preview = text.replace(/\s+/g, " ").slice(0, 240);
+    return {
+      payload: {
+        apiDebug: {
+          rawBody: preview,
+          status: response.status,
+          statusText: response.statusText,
+        },
+        error: looksLikeHtml
+          ? "当前页面没有可用的生图后端服务。GitHub Pages 是静态网页，不能直接调用本地 /api/generate-images；请在本地 dev server 使用生图，或接入线上后端/Serverless。"
+          : "生图接口返回了非 JSON 内容，请查看原始接口返回。",
+      },
+      rawText: text,
+    };
+  }
+}
+
 const defaultButtonStyle = {
   bgFrom: "#ffeaa8",
   bgTo: "#f5baff",
@@ -1426,7 +1453,7 @@ export function App() {
         }),
       });
 
-      const payload = await response.json();
+      const { payload } = await readApiPayload(response);
       if (!response.ok) {
         if (payload?.apiDebug) {
           setGenerationErrorDetail(JSON.stringify(payload.apiDebug, null, 2));
