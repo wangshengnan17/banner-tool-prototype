@@ -4,6 +4,9 @@ import atmosphereTwo from "./assets/atmosphere-2.png";
 import atmosphereThree from "./assets/atmosphere-3.png";
 import atmosphereFour from "./assets/atmosphere-4.png";
 import atmospherePortrait from "./assets/atmosphere-portrait-240x432.png";
+import { ProjectNav } from "./ProjectNav.jsx";
+import { IterationPanel } from "./IterationPanel.jsx";
+import { generateImages, saveGeneration } from "./api.js";
 
 const candidates = [
   {
@@ -68,6 +71,7 @@ const imageModelOptions = [
   { value: "wan2.7-image", label: "wan2.7-image", note: "速度更快，适合测试", apiMode: "dashscope-wan" },
   { value: "qwen-image-2.0-pro", label: "qwen-image-2.0-pro", note: "细节与文字处理更强", apiMode: "dashscope-wan" },
   { value: "qwen-image-2.0", label: "qwen-image-2.0", note: "轻量生成", apiMode: "dashscope-wan" },
+  { value: "openai/gpt-5.4-image-2", label: "openai/gpt-5.4-image-2", note: "走 Chat Completions；需配置 NEW_API_KEY/OPENAI_API_KEY", apiMode: "chat-completions" },
   { value: "custom", label: "自定义模型", note: "输入平台支持的模型名", apiMode: "" },
 ];
 
@@ -79,6 +83,33 @@ function inferApiModeForModel(model) {
     return "chat-completions";
   }
   return "";
+}
+
+function ModelConfigSelector({ value, onChange, type }) {
+  const [configs, setConfigs] = useState([]);
+
+  useEffect(() => {
+    import("./api.js").then(({ listModelConfigs }) => {
+      listModelConfigs(type).then(setConfigs).catch(() => {});
+    });
+  }, [type]);
+
+  if (configs.length === 0) return null;
+
+  return (
+    <select
+      className="model-config-select"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">默认 (环境变量)</option>
+      {configs.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name} ({c.model_name})
+        </option>
+      ))}
+    </select>
+  );
 }
 
 function staticHostGenerationMessage() {
@@ -811,6 +842,7 @@ function BannerPreview({ template, fields, image, selected, onClick, compact = f
           <span>{template.type}</span>
         </div>
         <div className="preview-flags">
+          {selected && <small className="selected-flag">当前测试</small>}
           <small className="mode-flag">尺寸适配图</small>
           <small className={needsCheck ? "status-warn" : "status-ok"}>{template.status}</small>
         </div>
@@ -1029,6 +1061,7 @@ function TemplateSpecDrawer({ fields, image, onAdd, onClose, onSelect, onUpdate,
 
 function PromptSettings({
   customImageModel,
+  currentTestLabel,
   generatedAt,
   generationError,
   generationErrorDetail,
@@ -1036,9 +1069,11 @@ function PromptSettings({
   generatedModel,
   imageModel,
   isGenerating,
+  modelConfigId,
   onCustomImageModelChange,
   onGenerate,
   onImageModelChange,
+  onModelConfigChange,
   onTestGenerate,
   onPromptChange,
   onReferenceChange,
@@ -1092,6 +1127,7 @@ function PromptSettings({
             onChange={(event) => onCustomImageModelChange(event.target.value)}
           />
         ) : null}
+        <ModelConfigSelector value={modelConfigId} onChange={onModelConfigChange} type="generation" />
       </div>
 
       <div className="field wide prompt-field">
@@ -1117,13 +1153,14 @@ function PromptSettings({
           {isGenerating && generationTask === "batch" ? "生成中..." : "生成"}
         </button>
       </div>
+      <div className="test-target-note">测试单张会生成：{currentTestLabel}</div>
 
       <div className={`prompt-hint ${generationError ? "error" : ""}`}>
         {generationError
           ? `生成失败：${generationError}`
           : isGenerating
           ? generationTask === "test"
-            ? "正在测试当前选中尺寸，确认模型能否返回可用图片。"
+            ? `正在测试 ${currentTestLabel}，确认模型能否返回可用图片。`
             : "正在逐张生成 6 个尺寸的适配图，图片模型通常需要等待几十秒到数分钟。"
           : promptDirty
             ? "提示词已修改，点击「生成」后再更新多尺寸预览。"
@@ -1366,13 +1403,21 @@ export function App() {
   const [generatedModel, setGeneratedModel] = useState("");
   const [generationError, setGenerationError] = useState("");
   const [generationErrorDetail, setGenerationErrorDetail] = useState("");
-  const [imageModel, setImageModel] = useState("wan2.7-image-pro");
+  const [imageModel, setImageModel] = useState("openai/gpt-5.4-image-2");
   const [customImageModel, setCustomImageModel] = useState("");
   const [referenceImage, setReferenceImage] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [originalOpen, setOriginalOpen] = useState(false);
   const [specOpen, setSpecOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
+  const [modelConfigId, setModelConfigId] = useState("");
+
+  // ---- PocketBase state ----
+  const [project, setProject] = useState(null);
+  const [task, setTask] = useState(null);
+  const [iteration, setIteration] = useState(null);
+  const [iterations, setIterations] = useState([]);
+  const [savedResults, setSavedResults] = useState(null);
   const [prompt, setPrompt] = useState(
     "电商促销氛围图，紫色和蓝色科技风格，卡券元素、3D 渲染、光效舞台、金色金币和红包 floating，动感粒子，未来感灯光；不要生成文字、数字、Logo 或水印。",
   );
@@ -1418,14 +1463,9 @@ export function App() {
   }
 
   async function generateAtmosphereImages({ testSingle = false } = {}) {
-    if (isGenerating) {
-      return;
-    }
-
-    const staticGenerationMessage = staticHostGenerationMessage();
-    if (staticGenerationMessage) {
-      setGenerationError(staticGenerationMessage);
-      setGenerationErrorDetail("");
+    if (isGenerating) return;
+    if (!selectedImageModel) {
+      setGenerationError("请先选择或输入生图模型");
       return;
     }
 
@@ -1433,13 +1473,6 @@ export function App() {
     setGenerationTask(testSingle ? "test" : "batch");
     setGenerationError("");
     setGenerationErrorDetail("");
-
-    if (!selectedImageModel) {
-      setIsGenerating(false);
-      setGenerationTask("");
-      setGenerationError("请先选择或输入生图模型");
-      return;
-    }
 
     const testTemplate = templates.find((template) => template.key === selectedSize) || templates[0];
     const jobs = testSingle
@@ -1459,48 +1492,53 @@ export function App() {
       }));
 
     try {
-      const response = await fetch("/api/generate-images", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          fields,
-          jobs,
-          apiMode: selectedApiMode,
-          mode: "adaptive",
-          model: selectedImageModel,
-          prompt,
-          referenceImage,
-        }),
+      const { results } = await generateImages({
+        jobs,
+        model: selectedImageModel,
+        apiMode: selectedApiMode,
+        modelConfigId,
+        referenceImage: referenceImage?.src ? { name: referenceImage.name, src: referenceImage.src } : undefined,
       });
 
-      const { payload } = await readApiPayload(response);
-      if (!response.ok) {
-        if (payload?.apiDebug) {
-          setGenerationErrorDetail(JSON.stringify(payload.apiDebug, null, 2));
-        }
-        throw new Error(payload?.error || "图片生成失败");
-      }
+      const templateImages = {};
+      results.forEach((r) => {
+        templateImages[r.key] = r.src;
+      });
 
       const nextGeneratedSet = testSingle
         ? {
-          generatedCandidates: generatedSet?.generatedCandidates || payload.candidates,
-          templateImages: {
-            ...(generatedSet?.templateImages || {}),
-            ...(payload.templateImages || {}),
-          },
+          generatedCandidates: generatedSet?.generatedCandidates || [],
+          templateImages: { ...(generatedSet?.templateImages || {}), ...templateImages },
         }
         : {
-          generatedCandidates: payload.candidates,
-          templateImages: payload.templateImages,
+          generatedCandidates: [],
+          templateImages,
         };
 
       setGeneratedSet(nextGeneratedSet);
-      setGenerationRound((current) => current + 1);
-      setGeneratedModel(payload.model || "OpenAI image model");
+      setGenerationRound((c) => c + 1);
+      setGeneratedModel(results[0]?.modelUsed || selectedImageModel);
       setPromptDirty(false);
       setGeneratedAt(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }));
+
+      if (iteration && !testSingle) {
+        try {
+          const saved = await saveGeneration({
+            iterationId: iteration.id,
+            title: fields.title,
+            subtitle: fields.subtitle,
+            buttonText: fields.buttonText,
+            activityTime: fields.activityTime,
+            prompt,
+            imageModel: selectedImageModel,
+            apiMode: selectedApiMode,
+            results,
+          });
+          setSavedResults(saved);
+        } catch (saveErr) {
+          console.warn("自动保存失败 (PocketBase 未启动?)", saveErr);
+        }
+      }
     } catch (error) {
       setGenerationError(error instanceof Error ? error.message : "图片生成失败");
     } finally {
@@ -1584,22 +1622,16 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">B</span>
-          <div>
-            <h1>多尺寸活动 Banner 工具</h1>
-            <p>省钱卡 618 首波福利 · 自动保存</p>
-          </div>
-        </div>
-        <nav className="main-nav">
-          <a className="active">活动任务</a>
-          <a>模板库</a>
-          <a>素材库</a>
-          <a>导出记录</a>
-        </nav>
-        <div className="user-chip">设计师-小王</div>
-      </header>
+      <ProjectNav
+        project={project}
+        setProject={setProject}
+        task={task}
+        setTask={setTask}
+        iteration={iteration}
+        setIteration={setIteration}
+        iterations={iterations}
+        setIterations={setIterations}
+      />
 
       <div className="workspace">
         <aside className="left-column">
@@ -1632,6 +1664,7 @@ export function App() {
 
           <PromptSettings
             customImageModel={customImageModel}
+            currentTestLabel={activeTemplate.label}
             generatedAt={generatedAt}
             generationError={generationError}
             generationErrorDetail={generationErrorDetail}
@@ -1639,9 +1672,11 @@ export function App() {
             generatedModel={generatedModel}
             imageModel={imageModel}
             isGenerating={isGenerating}
+            modelConfigId={modelConfigId}
             onCustomImageModelChange={updateCustomImageModel}
             onGenerate={generateAtmosphereImages}
             onImageModelChange={updateImageModel}
+            onModelConfigChange={setModelConfigId}
             onTestGenerate={() => generateAtmosphereImages({ testSingle: true })}
             onPromptChange={updatePrompt}
             onReferenceChange={setReferenceImage}
@@ -1649,6 +1684,13 @@ export function App() {
             promptDirty={promptDirty}
             referenceImage={referenceImage}
           />
+
+          {iteration && (
+            <IterationPanel
+              iteration={iteration}
+              iterationResults={savedResults?.savedResults}
+            />
+          )}
         </aside>
 
         <section className="preview-column panel">
@@ -1671,6 +1713,7 @@ export function App() {
                 image={imageForTemplate(template)}
                 key={template.key}
                 onClick={() => openOriginalPreview(template.key)}
+                selected={template.key === activeTemplate.key}
                 template={template}
               />
             ))}
