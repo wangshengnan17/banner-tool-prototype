@@ -81,6 +81,21 @@ function inferApiModeForModel(model) {
   return "";
 }
 
+function staticHostGenerationMessage() {
+  if (typeof window === "undefined") return "";
+
+  const { hostname, protocol } = window.location;
+  if (hostname.endsWith("github.io")) {
+    return "当前是 GitHub Pages 静态版，不能直接调用生图接口。请回到本地 dev server 使用生图，或后续接入线上后端/Serverless。";
+  }
+
+  if (protocol === "file:") {
+    return "当前是本地文件预览，不能直接调用生图接口。请用 npm run dev 启动本地 dev server 后再生成。";
+  }
+
+  return "";
+}
+
 async function readApiPayload(response) {
   const text = await response.text();
 
@@ -1404,6 +1419,13 @@ export function App() {
 
   async function generateAtmosphereImages({ testSingle = false } = {}) {
     if (isGenerating) {
+      return;
+    }
+
+    const staticGenerationMessage = staticHostGenerationMessage();
+    if (staticGenerationMessage) {
+      setGenerationError(staticGenerationMessage);
+      setGenerationErrorDetail("");
       return;
     }
 
