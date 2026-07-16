@@ -208,6 +208,26 @@ function hasEmptyAssistantMessage(value) {
   return !message.content && !message.images && !message.image && !message.image_url;
 }
 
+function defaultBaseUrlForModel(model, apiMode) {
+  if (apiMode === "dashscope-wan") {
+    return process.env.DASHSCOPE_API_BASE_URL || "https://dashscope.aliyuncs.com/api/v1";
+  }
+
+  if (apiMode === "chat-completions" && model.startsWith("openai/")) {
+    return process.env.IMAGE_API_BASE_URL || process.env.OPENAI_BASE_URL || "https://llm.hupan.info/v1";
+  }
+
+  return process.env.IMAGE_API_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+}
+
+function apiKeyForMode(apiMode) {
+  if (apiMode === "dashscope-wan") {
+    return process.env.DASHSCOPE_API_KEY || process.env.QIANWEN_API_KEY || process.env.NEW_API_KEY || process.env.OPENAI_API_KEY;
+  }
+
+  return process.env.NEW_API_KEY || process.env.OPENAI_API_KEY || process.env.DASHSCOPE_API_KEY || process.env.QIANWEN_API_KEY;
+}
+
 async function normalizeImageSource(source, timeoutMs = 120000) {
   if (source.startsWith("data:image/")) return source;
   if (source.startsWith("http://") || source.startsWith("https://")) {
@@ -487,6 +507,45 @@ async function generateDashScopeWanImage({ apiKey, baseUrl, job, model, referenc
   };
 }
 
+// 异步尝试将 Vite 代理的生成结果保存到 PocketBase 后端
+async function trySaveToBackend(iterationId, results, body, model) {
+  const PB_URL = "http://127.0.0.1:8090";
+  try {
+    // 先检查后端是否可用
+    const healthCheck = await fetch(`${PB_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
+    if (!healthCheck.ok) return;
+
+    // 保存 generation config
+    const saveResp = await fetch(`${PB_URL}/api/custom/generations/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        iterationId,
+        title: body.title || "",
+        subtitle: body.subtitle || "",
+        prompt: body.prompt || "",
+        imageModel: model,
+        apiMode: body.apiMode || "",
+        results: results.map((r) => ({
+          key: r.key,
+          label: r.label,
+          width: r.width,
+          height: r.height,
+          src: r.src,
+          promptUsed: r.promptUsed || body.prompt || "",
+          modelUsed: r.modelUsed || model,
+          size: r.size || "",
+        })),
+      }),
+    });
+    if (saveResp.ok) {
+      console.log(`[vite proxy] 已将 ${results.length} 张图保存到后端`);
+    }
+  } catch {
+    // 后端不可用，静默跳过
+  }
+}
+
 function imageGenerationMiddleware() {
   return {
     name: "banner-image-generation-api",
@@ -497,15 +556,26 @@ function imageGenerationMiddleware() {
           return;
         }
 
-        const rawApiKey = process.env.DASHSCOPE_API_KEY || process.env.QIANWEN_API_KEY || process.env.NEW_API_KEY || process.env.OPENAI_API_KEY;
-        if (!rawApiKey) {
-          sendJson(res, 400, {
-            error: "本地未配置 DASHSCOPE_API_KEY、QIANWEN_API_KEY、NEW_API_KEY 或 OPENAI_API_KEY。请配置后重启 dev server，再点击「生成氛围图」。",
-          });
-          return;
-        }
-
         try {
+          const body = await readJsonBody(req);
+          const mode = body.mode === "single" ? "single" : "adaptive";
+          const requestedModel = typeof body.model === "string" ? body.model.trim() : "";
+          const requestedApiMode = typeof body.apiMode === "string" ? body.apiMode.trim() : "";
+          const model = requestedModel || process.env.OPENAI_IMAGE_MODEL || process.env.QIANWEN_IMAGE_MODEL || "openai/gpt-5.4-image-2";
+          const isWanModel = model.startsWith("wan") || model.startsWith("qwen-image");
+          const apiMode = requestedApiMode || process.env.IMAGE_API_MODE || (isWanModel ? "dashscope-wan" : "chat-completions");
+          const baseUrl = defaultBaseUrlForModel(model, apiMode);
+          const rawApiKey = apiKeyForMode(apiMode);
+
+          if (!rawApiKey) {
+            sendJson(res, 400, {
+              error: apiMode === "dashscope-wan"
+                ? "当前模型需要 DASHSCOPE_API_KEY 或 QIANWEN_API_KEY。请配置后重启 dev server，再点击「生成」。"
+                : "当前模型需要 NEW_API_KEY 或 OPENAI_API_KEY。请配置后重启 dev server，再点击「生成」。",
+            });
+            return;
+          }
+
           const apiKey = rawApiKey.trim();
           if (!isAsciiHeaderValue(apiKey) || isLikelyPlaceholderApiKey(apiKey)) {
             sendJson(res, 400, {
@@ -514,16 +584,6 @@ function imageGenerationMiddleware() {
             return;
           }
 
-          const body = await readJsonBody(req);
-          const mode = body.mode === "single" ? "single" : "adaptive";
-          const requestedModel = typeof body.model === "string" ? body.model.trim() : "";
-          const requestedApiMode = typeof body.apiMode === "string" ? body.apiMode.trim() : "";
-          const model = requestedModel || process.env.OPENAI_IMAGE_MODEL || process.env.QIANWEN_IMAGE_MODEL || "wan2.7-image-pro";
-          const isWanModel = model.startsWith("wan") || model.startsWith("qwen-image");
-          const apiMode = requestedApiMode || process.env.IMAGE_API_MODE || (isWanModel ? "dashscope-wan" : "images");
-          const baseUrl = apiMode === "dashscope-wan"
-            ? process.env.DASHSCOPE_API_BASE_URL || "https://dashscope.aliyuncs.com/api/v1"
-            : process.env.IMAGE_API_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
           const maxTokens = Number(process.env.IMAGE_API_MAX_TOKENS || 8192);
           const quality = process.env.OPENAI_IMAGE_QUALITY || "high";
           const temperature = Number(process.env.OPENAI_IMAGE_TEMPERATURE || 0.7);
@@ -605,6 +665,14 @@ function imageGenerationMiddleware() {
             templateImageSets,
             timeoutMs,
           });
+
+          // 异步尝试将结果保存到 PocketBase 后端（不阻塞响应）
+          const iterationId = body.iterationId;
+          if (iterationId) {
+            trySaveToBackend(iterationId, results, body, model).catch(() => {
+              // 静默失败，不妨碍主流程
+            });
+          }
         } catch (error) {
           sendJson(res, 500, {
             apiDebug: errorDebug(error),

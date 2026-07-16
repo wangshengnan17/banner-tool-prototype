@@ -10,6 +10,7 @@ export function IterationPanel({ iteration, iterationResults }) {
   const [scoringFor, setScoringFor] = useState(null);
   const [scoreModels, setScoreModels] = useState([]);
   const [selectedScorer, setSelectedScorer] = useState("");
+  const [selectedResultId, setSelectedResultId] = useState("");
 
   useEffect(() => {
     if (!iteration) return;
@@ -21,8 +22,15 @@ export function IterationPanel({ iteration, iterationResults }) {
     }).catch(() => {});
   }, [iteration]);
 
+  // Auto-select first result when results change
+  useEffect(() => {
+    if (iterationResults && iterationResults.length > 0) {
+      setSelectedResultId(iterationResults[0].id);
+    }
+  }, [iterationResults]);
+
   async function handleEvaluate(result) {
-    if (!result || !result.image) return;
+    if (!result || (!result.image && !result.imageUrl)) return;
     setScoring(true);
     setScoringFor(result.id);
 
@@ -36,10 +44,10 @@ export function IterationPanel({ iteration, iterationResults }) {
       }
 
       const evalResp = await evaluateImage({
-        imageSrc: result.image,
+        imageSrc: result.image || result.imageUrl,
         scorerModel,
         modelConfigId,
-        sizeKey: result.size_key,
+        sizeKey: result.size_key || result.sizeKey,
       });
 
       await saveEvaluation({
@@ -119,10 +127,22 @@ export function IterationPanel({ iteration, iterationResults }) {
               ))}
             </select>
           </div>
+          <div className="eval-result-select">
+            <select value={selectedResultId} onChange={(e) => setSelectedResultId(e.target.value)}>
+              {iterationResults.map((r, idx) => (
+                <option key={r.id} value={r.id}>
+                  {(r.size_key || r.sizeKey || `图${idx + 1}`)} {r.width}×{r.height}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             className="soft-button"
             disabled={scoring}
-            onClick={() => handleEvaluate(iterationResults[0])}
+            onClick={() => {
+              const target = iterationResults.find((r) => r.id === selectedResultId) || iterationResults[0];
+              handleEvaluate(target);
+            }}
           >
             {scoring ? "评估中..." : "AI 打分"}
           </button>

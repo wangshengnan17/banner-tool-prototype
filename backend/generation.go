@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"os"
@@ -22,6 +23,8 @@ type ImageJob struct {
 	Prompt      string `json:"prompt"`
 	Width       int    `json:"width"`
 	Height      int    `json:"height"`
+	Title       string `json:"title,omitempty"`
+	Subtitle    string `json:"subtitle,omitempty"`
 	CandidateId string `json:"candidateId,omitempty"`
 }
 
@@ -299,11 +302,17 @@ func generateImagesApiImage(apiKey, baseUrl string, job ImageJob, model, quality
 	}
 
 	first := data[0].(map[string]any)
-	if b64, ok := first["b64_json"].(string); ok {
+	if b64, ok := first["b64_json"].(string); ok && len(b64) > 100 {
 		return "data:image/png;base64," + b64, size, nil
 	}
-	if u, ok := first["url"].(string); ok {
+	if u, ok := first["url"].(string); ok && u != "" {
+		log.Printf("[images] 下载图片 URL: %s (len=%d)", u[:min(80, len(u))], len(u))
 		src, err := fetchImageAsDataUrl(u, timeout)
+		if err != nil {
+			log.Printf("[images] 下载失败: %v", err)
+		} else {
+			log.Printf("[images] 下载成功, data URL 长度: %d", len(src))
+		}
 		return src, size, err
 	}
 
@@ -314,10 +323,21 @@ func generateChatCompletionImage(apiKey, baseUrl string, job ImageJob, model str
 	size := imageSizeForJob(job, model)
 	endpoint := withoutTrailingSlash(baseUrl) + "/chat/completions"
 
-	prompt := fmt.Sprintf(
-		"请生成一张可直接用于电商 Banner 的氛围图，不要只输出文字描述。\n%s\n目标画布比例参考：%dx%d。\n不要在图片中生成任何文字、数字、Logo、水印或可读字符；主副标题会由系统模板另外叠加。\n如果接口支持图片输出，请返回图片数据或图片 URL。",
-		job.Prompt, job.Width, job.Height,
+	promptLines := []string{
+		fmt.Sprintf("请生成一张可直接用于电商 Banner 的图片，图中必须包含以下文字信息："),
+		fmt.Sprintf("- 主标题：「%s」", job.Title),
+	}
+	if job.Subtitle != "" {
+		promptLines = append(promptLines, fmt.Sprintf("- 副标题：「%s」", job.Subtitle))
+	}
+	promptLines = append(promptLines,
+		"文字排版要求：主标题醒目突出，副标题（如果有）略小一些；文字不要贴边，四周留有呼吸空间。",
+		job.Prompt,
+		fmt.Sprintf("目标画布比例参考：%dx%d。", job.Width, job.Height),
+		"不要添加 Logo、水印或其他无关文字。",
+		"如果接口支持图片输出，请返回图片数据或图片 URL。",
 	)
+	prompt := strings.Join(promptLines, "\n")
 
 	content := []map[string]any{
 		{"type": "text", "text": prompt},
@@ -334,8 +354,9 @@ func generateChatCompletionImage(apiKey, baseUrl string, job ImageJob, model str
 		"messages": []map[string]any{
 			{"role": "user", "content": content},
 		},
-		"max_tokens":  maxTokens,
-		"temperature": temperature,
+		"modalities":   []string{"image", "text"},
+		"max_tokens":   maxTokens,
+		"temperature":  temperature,
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -474,16 +495,20 @@ type generateFn func() (src, size string, err error)
 func withRetries(fn generateFn, maxRetries int, label string) (string, string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("[%s] 第 %d/%d 次尝试...", label, attempt, maxRetries)
 		src, size, err := fn()
 		if err == nil {
+			log.Printf("[%s] 成功", label)
 			return src, size, nil
 		}
 		lastErr = err
+		log.Printf("[%s] 失败: %v", label, err)
 		if attempt >= maxRetries || !isRetriable(err) {
 			break
 		}
 		time.Sleep(time.Duration(800*attempt) * time.Millisecond)
 	}
+	log.Printf("[%s] 已放弃（重试 %d 次后仍失败）", label, maxRetries)
 	return "", "", fmt.Errorf("%s 生成失败: %w", label, lastErr)
 }
 
@@ -576,6 +601,85 @@ func generateAllImages(req GenerateRequest, apiKey, baseUrl string) ([]GenerateR
 	}
 
 	return mapWithConcurrency(req.Jobs, concurrency, fn)
+}
+
+// generateAllImagesStream — 流式版本，每完成一张图即回调 onResult
+func generateAllImagesStream(req GenerateRequest, apiKey, baseUrl string, onResult func(GenerateResult), onError func(string, error)) {
+	timeout := time.Duration(envInt("IMAGE_API_TIMEOUT_MS", 600000)) * time.Millisecond
+	concurrency := envInt("IMAGE_API_CONCURRENCY", 1)
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	maxRetries := envInt("IMAGE_API_RETRIES", 1) + 1
+
+	quality := envDefault("OPENAI_IMAGE_QUALITY", "high")
+	maxTokens := envInt("IMAGE_API_MAX_TOKENS", 8192)
+	temperature := envFloat("OPENAI_IMAGE_TEMPERATURE", 0.7)
+
+	type jobResult struct {
+		job ImageJob
+		res GenerateResult
+		err error
+	}
+
+	results := make(chan jobResult, len(req.Jobs))
+	sem := make(chan struct{}, concurrency)
+
+	for _, job := range req.Jobs {
+		go func(j ImageJob) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			label := j.Label
+			if label == "" {
+				label = j.Key
+			}
+
+			src, size, err := withRetries(func() (string, string, error) {
+				switch req.ApiMode {
+				case "dashscope-wan":
+					return generateDashScopeWanImage(apiKey, baseUrl, j, req.Model, req.ReferenceImage, timeout)
+				case "chat-completions":
+					return generateChatCompletionImage(apiKey, baseUrl, j, req.Model, req.ReferenceImage, temperature, maxTokens, timeout)
+				default:
+					return generateImagesApiImage(apiKey, baseUrl, j, req.Model, quality, timeout)
+				}
+			}, maxRetries, label)
+
+			results <- jobResult{
+				job: j,
+				res: GenerateResult{
+					Key:        j.Key,
+					Label:      j.Label,
+					Src:        src,
+					Size:       size,
+					ModelUsed:  req.Model,
+					PromptUsed: j.Prompt,
+					Width:      j.Width,
+					Height:     j.Height,
+				},
+				err: err,
+			}
+
+			// 逐张间延迟，避免 rate limit
+			delaySec := envInt("IMAGE_API_JOB_DELAY_SEC", 600)
+			if delaySec > 0 {
+				time.Sleep(time.Duration(delaySec) * time.Second)
+			}
+		}(job)
+	}
+
+	completed := 0
+	total := len(req.Jobs)
+	for completed < total {
+		r := <-results
+		if r.err != nil {
+			onError(r.job.Key, r.err)
+		} else {
+			onResult(r.res)
+		}
+		completed++
+	}
 }
 
 func envInt(key string, fallback int) int {

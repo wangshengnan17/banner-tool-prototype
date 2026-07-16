@@ -6,7 +6,8 @@ import atmosphereFour from "./assets/atmosphere-4.png";
 import atmospherePortrait from "./assets/atmosphere-portrait-240x432.png";
 import { ProjectNav } from "./ProjectNav.jsx";
 import { IterationPanel } from "./IterationPanel.jsx";
-import { generateImages, saveGeneration } from "./api.js";
+import { HistoryPanel } from "./HistoryPanel.jsx";
+import { generateImages, generateImagesStream, saveGeneration, getIterationResults, listActivityTemplates, saveActivityTemplate, deleteActivityTemplate } from "./api.js";
 
 const candidates = [
   {
@@ -162,93 +163,33 @@ const defaultButtonStyle = {
 
 const defaultTemplates = [
   {
-    key: "398x225",
-    label: "398 x 225",
-    type: "标准横版",
-    width: 398,
-    height: 225,
-    status: "正常",
+    key: "398x225", label: "398 x 225", type: "标准横版", width: 398, height: 225, status: "正常",
     showLogo: false,
-    showButton: true,
-    title: { x: 29, y: 43, w: 190, h: 48, fs: 42, lh: 48, color: "#FFE59A", fontFamily: "造字工房元黑" },
-    subtitle: { x: 29, y: 103, w: 210, h: 30, fs: 24, lh: 30, color: "#FFFFFF", fontFamily: "Alibaba PuHuiTi", fontWeight: 500 },
-    button: { x: 34, y: 145, w: 120, h: 42, fs: 24 },
-    time: { x: 288, y: 20, w: 88, h: 34, fs: 16 },
     bg: "68% 50%",
   },
   {
-    key: "240x360",
-    label: "240 x 360",
-    type: "竖版",
-    width: 240,
-    height: 360,
-    status: "正常",
+    key: "240x360", label: "240 x 360", type: "竖版", width: 240, height: 360, status: "正常",
     showLogo: false,
-    showButton: false,
-    title: { x: 0, y: 43, w: 240, h: 48, fs: 38, lh: 44, color: "#FFFFFF", align: "center" },
-    subtitle: { x: 0, y: 101, w: 240, h: 30, fs: 23, lh: 30, color: "#FFF35A", align: "center" },
-    time: { x: 151, y: 129, w: 72, h: 30, fs: 13 },
     bg: "50% 50%",
   },
   {
-    key: "520x294",
-    label: "520 x 294",
-    type: "标准横版",
-    width: 520,
-    height: 294,
-    status: "正常",
+    key: "520x294", label: "520 x 294", type: "标准横版", width: 520, height: 294, status: "正常",
     showLogo: true,
-    showButton: true,
-    title: { x: 40, y: 80, w: 214, h: 48, fs: 40, lh: 48, color: "#FFE59A" },
-    subtitle: { x: 40, y: 139, w: 220, h: 32, fs: 25, lh: 32, color: "#FFF7A6" },
-    button: { x: 40, y: 176, w: 148, h: 42, fs: 24 },
-    time: { x: 408, y: 35, w: 94, h: 38, fs: 17 },
     bg: "68% 50%",
   },
   {
-    key: "849x316",
-    label: "849 x 316",
-    type: "超宽横版",
-    width: 849,
-    height: 316,
-    status: "正常",
+    key: "849x316", label: "849 x 316", type: "超宽横版", width: 849, height: 316, status: "正常",
     showLogo: false,
-    showButton: true,
-    title: { x: 64, y: 82, w: 290, h: 64, fs: 54, lh: 62, color: "#FFE59A" },
-    subtitle: { x: 65, y: 149, w: 300, h: 40, fs: 31, lh: 38, color: "#FFFFFF" },
-    button: { x: 64, y: 191, w: 192, h: 50, fs: 30 },
-    time: { x: 648, y: 12, w: 130, h: 52, fs: 24 },
     bg: "67% 50%",
   },
   {
-    key: "552x228",
-    label: "552 x 228",
-    type: "紧凑横版",
-    width: 552,
-    height: 228,
-    status: "建议检查",
+    key: "552x228", label: "552 x 228", type: "紧凑横版", width: 552, height: 228, status: "建议检查",
     showLogo: true,
-    showButton: true,
-    buttonText: "0元开通",
-    title: { x: 50, y: 48, w: 190, h: 42, fs: 34, lh: 40, color: "#FFE59A" },
-    subtitle: { x: 52, y: 102, w: 210, h: 30, fs: 25, lh: 31, color: "#FFF7A6" },
-    button: { x: 52, y: 136, w: 132, h: 38, fs: 22 },
-    time: { x: 416, y: 25, w: 94, h: 36, fs: 17 },
     bg: "67% 50%",
   },
   {
-    key: "846x417",
-    label: "846 x 417",
-    type: "大横版",
-    width: 846,
-    height: 417,
-    status: "正常",
+    key: "846x417", label: "846 x 417", type: "大横版", width: 846, height: 417, status: "正常",
     showLogo: true,
-    showButton: true,
-    title: { x: 72, y: 116, w: 312, h: 72, fs: 62, lh: 72, color: "#FFE59A" },
-    subtitle: { x: 75, y: 194, w: 330, h: 42, fs: 36, lh: 44, color: "#FFF7A6" },
-    button: { x: 67, y: 243, w: 205, h: 62, fs: 34 },
-    time: { x: 704, y: 40, w: 118, h: 50, fs: 22 },
     bg: "67% 50%",
   },
 ];
@@ -277,50 +218,38 @@ function backgroundZoom(template) {
   return template.bgZoom || DEFAULT_BG_ZOOM;
 }
 
-function layerBounds(template) {
-  const layers = [template.title, template.subtitle, template.showButton ? template.button : null].filter(Boolean);
-  const left = Math.min(...layers.map((layer) => layer.x));
-  const top = Math.min(...layers.map((layer) => layer.y));
-  const right = Math.max(...layers.map((layer) => layer.x + layer.w));
-  const bottom = Math.max(...layers.map((layer) => layer.y + layer.h));
-
-  return {
-    left,
-    top,
-    right,
-    bottom,
-    width: right - left,
-    height: bottom - top,
-  };
-}
-
-function layoutDirection(template) {
-  const bounds = layerBounds(template);
-  if ((template.title.align || "left") === "center" && bounds.left <= template.width * 0.08) {
-    return "主副标题居中在画面上方，主体元素完整放在中下区域，不能出画面或被边缘裁断，顶部文字区保持安静深色背景；竖版不要用横图裁切，要生成竖版专属构图";
-  }
-
-  if (bounds.right <= template.width * 0.46) {
-    return "左侧是文案安全区，主体元素偏右，右侧要有完整促销主体和层次光效";
-  }
-
-  return "文案区域优先保持干净，主体元素避开标题、副标题和按钮位置";
-}
-
 function templatePrompt(template, fields, basePrompt) {
-  const bounds = layerBounds(template);
-  const safeArea = `${bounds.left},${bounds.top},${bounds.width},${bounds.height}`;
   const isPortrait = template.height > template.width;
-  const outputSize = isPortrait ? `${template.width}x${Math.round(template.height * 1.2)}px 竖版出血图，最终裁切为 ${template.width}x${template.height}px` : `${template.width}x${template.height}px`;
+  const { width, height } = template;
 
-  return [
-    `生成 ${outputSize} 电商活动 banner 氛围图，主题是「${fields.title} / ${fields.subtitle}」。`,
-    layoutDirection(template),
-    `文案安全区坐标为 x:${bounds.left}px y:${bounds.top}px w:${bounds.width}px h:${bounds.height}px，这块区域不要出现复杂主体、高亮元素、文字、数字、Logo 或水印。`,
-    `画面风格参考：${basePrompt}`,
-    `输出必须适配 ${template.label}，主体位置在生成阶段完成，后期只做少量位置微调，safe-area:${safeArea}。`,
-  ].join("\n");
+  // 用自然语言描述文字位置，不给硬坐标避免模型切割画面
+  let layoutGuide;
+  if (isPortrait) {
+    const topMargin = Math.round(height * 0.20);
+    layoutGuide = [
+      `竖版 ${width}×${height} 电商 banner，整体画面连贯统一，背景氛围从顶部到底部自然过渡，不要出现区域分割或拼接痕迹。`,
+      `标题「${fields.title}」${fields.subtitle ? `和副标题「${fields.subtitle}」` : ""}放在画面上部，距顶部约 ${topMargin}px 处开始，水平居中，文字四周留出明显呼吸空间，不要贴边。`,
+      `促销视觉元素（产品、光效、装饰）自然分布在画面中下部，与背景融为一体。`,
+    ];
+  } else {
+    const leftMargin = Math.round(width * 0.18);
+    layoutGuide = [
+      `横版 ${width}×${height} 电商 banner，整体画面连贯统一，背景氛围从左到右自然过渡，不要出现区域分割或拼接痕迹。`,
+      `标题「${fields.title}」${fields.subtitle ? `和副标题「${fields.subtitle}」` : ""}放在画面左侧区域，距左边约 ${leftMargin}px 处开始，垂直居中，文字四周留出明显呼吸空间，不要贴边。`,
+      `促销视觉元素（产品、光效、装饰）自然分布在画面中部和右侧，与背景融为一体。`,
+    ];
+  }
+
+  const baseLines = [
+    `生成一张 ${width}×${height} 的电商活动 banner，主题「${fields.title} / ${fields.subtitle}」。`,
+    ...layoutGuide,
+    `画面风格：${basePrompt}`,
+    `重要：整个画面是统一的氛围背景，不要有左右或上下的分区切割。标题排版自然融入画面。`,
+  ];
+
+  return baseLines.join("\n");
 }
+
 
 function hashText(text) {
   let hash = 2166136261;
@@ -515,7 +444,7 @@ function createGeneratedSet({ fields, prompt, round, templates }) {
     const isPortrait = template.height > template.width;
     templateImages[template.key] = drawGeneratedAtmosphere({
       fields,
-      height: isPortrait ? Math.round(template.height * 1.2) : template.height,
+      height: template.height,
       prompt: templatePrompt(template, fields, prompt),
       seed: baseSeed + index * 211,
       variant: index % 3,
@@ -751,26 +680,6 @@ async function renderBannerJpeg(template, fields, imageSrc) {
     ctx.textAlign = "left";
   }
 
-  drawTextLayer(ctx, template.title, template, fields.title, 900);
-  drawTextLayer(ctx, template.subtitle, template, fields.subtitle, 760);
-
-  if (template.showButton && template.button) {
-    const b = template.button;
-    const buttonStyle = { ...defaultButtonStyle, ...b };
-    const gradient = ctx.createLinearGradient(b.x, b.y, b.x + b.w, b.y);
-    gradient.addColorStop(0, buttonStyle.bgFrom);
-    gradient.addColorStop(1, buttonStyle.bgTo);
-    drawRoundRect(ctx, b.x, b.y, b.w, b.h, b.h / 2);
-    ctx.fillStyle = gradient;
-    ctx.fill();
-    ctx.fillStyle = buttonStyle.textColor;
-    ctx.font = `760 ${b.fs}px "PingFang SC", "Microsoft YaHei", sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(template.buttonText || fields.buttonText, b.x + b.w / 2, b.y + b.h / 2 + 1);
-    ctx.textAlign = "left";
-  }
-
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
   return new Uint8Array(await blob.arrayBuffer());
 }
@@ -792,8 +701,26 @@ async function buildExportZip(fields, templates, imageForTemplate) {
   return createZip(files);
 }
 
+function ZoneOverlay({ zone, label, canvas }) {
+  return (
+    <div
+      className={`zone-overlay ${label}`}
+      style={{
+        left: pct(zone.x, canvas.width),
+        top: pct(zone.y, canvas.height),
+        width: pct(zone.w, canvas.width),
+        height: pct(zone.h, canvas.height),
+      }}
+    >
+      <span className="zone-label">{label === "text" ? "文字安全区" : "主视觉区"}</span>
+    </div>
+  );
+}
+
+
+
 function PreviewCanvas({ template, fields, image, compact = false, hero = false, original = false }) {
-  const buttonText = template.buttonText || fields.buttonText;
+  const isPortrait = template.height > template.width;
 
   return (
     <div
@@ -806,27 +733,6 @@ function PreviewCanvas({ template, fields, image, compact = false, hero = false,
     >
       <BannerImageLayer image={image} position={template.bg} template={template} zoom={backgroundZoom(template)} />
       {template.showLogo && <div className="tmall-logo">天猫618</div>}
-
-      <TextLayer layer={template.title} canvas={template} value={fields.title} kind="title" />
-      <TextLayer layer={template.subtitle} canvas={template} value={fields.subtitle} kind="subtitle" />
-
-      {template.showButton && template.button && (
-        <div
-          className="banner-button"
-          style={{
-            left: pct(template.button.x, template.width),
-            top: pct(template.button.y, template.height),
-            width: pct(template.button.w, template.width),
-            height: pct(template.button.h, template.height),
-            fontSize: fontCqw(template.button.fs, template.width),
-            color: template.button.textColor || defaultButtonStyle.textColor,
-            background: `linear-gradient(90deg, ${template.button.bgFrom || defaultButtonStyle.bgFrom}, ${template.button.bgTo || defaultButtonStyle.bgTo})`,
-          }}
-        >
-          {buttonText}
-        </div>
-      )}
-
     </div>
   );
 }
@@ -873,6 +779,8 @@ function TextLayer({ layer, canvas, value, kind }) {
         textAlign: layer.align || "left",
         fontFamily: layer.fontFamily ? `"${layer.fontFamily}", "PingFang SC", "Microsoft YaHei", sans-serif` : undefined,
         fontWeight: layer.fontWeight || undefined,
+        padding: "2cqw 3cqw",
+        boxSizing: "border-box",
       }}
     >
       {value}
@@ -913,29 +821,12 @@ function ColorControl({ label, value, onChange }) {
   );
 }
 
-function TemplateSpecDrawer({ fields, image, onAdd, onClose, onSelect, onUpdate, selectedKey, templates }) {
+function TemplateSpecDrawer({ fields, image, onAdd, onClose, onSelect, selectedKey, templates }) {
   const template = templates.find((item) => item.key === selectedKey) || templates[0];
+  const isPortrait = template.height > template.width;
   const [newTemplate, setNewTemplate] = useState({
-    label: "720 x 320",
-    width: 720,
-    height: 320,
-    type: "自定义横版",
+    label: "720 x 320", width: 720, height: 320, type: "自定义横版",
   });
-
-  function updateLayer(layerName, patch) {
-    onUpdate(template.key, (current) => ({
-      ...current,
-      [layerName]: { ...current[layerName], ...patch },
-    }));
-  }
-
-  function updateButton(patch) {
-    onUpdate(template.key, (current) => ({
-      ...current,
-      button: { ...(current.button || { x: 40, y: 160, w: 140, h: 42, fs: 24 }), ...defaultButtonStyle, ...current.button, ...patch },
-      showButton: true,
-    }));
-  }
 
   return (
     <div className="drawer-backdrop">
@@ -943,7 +834,7 @@ function TemplateSpecDrawer({ fields, image, onAdd, onClose, onSelect, onUpdate,
         <div className="drawer-header">
           <div>
             <p>模板规范</p>
-            <h2>文字层和新增模板</h2>
+            <h2>布局与新增模板</h2>
           </div>
           <button className="icon-button" type="button" onClick={onClose}>关闭</button>
         </div>
@@ -967,91 +858,31 @@ function TemplateSpecDrawer({ fields, image, onAdd, onClose, onSelect, onUpdate,
         </div>
 
         <section className="spec-section">
-          <div className="spec-section-head">
-            <strong>主标题</strong>
-            <select
-              value={template.title.align || "left"}
-              onChange={(event) => updateLayer("title", { align: event.target.value })}
-            >
-              <option value="left">左对齐</option>
-              <option value="center">居中</option>
-            </select>
-          </div>
-          <div className="spec-grid">
-            <ColorControl label="颜色" value={template.title.color} onChange={(color) => updateLayer("title", { color })} />
-            <SpecNumber label="字号" min={12} value={template.title.fs} onChange={(fs) => updateLayer("title", { fs })} />
-            <SpecNumber label="行高" min={12} value={template.title.lh} onChange={(lh) => updateLayer("title", { lh })} />
-            <SpecNumber label="X" value={template.title.x} onChange={(x) => updateLayer("title", { x })} />
-            <SpecNumber label="Y" value={template.title.y} onChange={(y) => updateLayer("title", { y })} />
-            <SpecNumber label="宽" value={template.title.w} onChange={(w) => updateLayer("title", { w })} />
-            <SpecNumber label="高" value={template.title.h} onChange={(h) => updateLayer("title", { h })} />
-          </div>
-        </section>
-
-        <section className="spec-section">
-          <div className="spec-section-head">
-            <strong>副标题</strong>
-            <select
-              value={template.subtitle.align || "left"}
-              onChange={(event) => updateLayer("subtitle", { align: event.target.value })}
-            >
-              <option value="left">左对齐</option>
-              <option value="center">居中</option>
-            </select>
-          </div>
-          <div className="spec-grid">
-            <ColorControl label="颜色" value={template.subtitle.color} onChange={(color) => updateLayer("subtitle", { color })} />
-            <SpecNumber label="字号" min={12} value={template.subtitle.fs} onChange={(fs) => updateLayer("subtitle", { fs })} />
-            <SpecNumber label="行高" min={12} value={template.subtitle.lh} onChange={(lh) => updateLayer("subtitle", { lh })} />
-            <SpecNumber label="X" value={template.subtitle.x} onChange={(x) => updateLayer("subtitle", { x })} />
-            <SpecNumber label="Y" value={template.subtitle.y} onChange={(y) => updateLayer("subtitle", { y })} />
-            <SpecNumber label="宽" value={template.subtitle.w} onChange={(w) => updateLayer("subtitle", { w })} />
-            <SpecNumber label="高" value={template.subtitle.h} onChange={(h) => updateLayer("subtitle", { h })} />
-          </div>
-        </section>
-
-        <section className="spec-section">
-          <div className="spec-section-head">
-            <strong>行动按钮</strong>
-            <label className="switch-row">
-              <input
-                checked={template.showButton}
-                type="checkbox"
-                onChange={(event) => onUpdate(template.key, (current) => ({ ...current, showButton: event.target.checked }))}
-              />
-              <span>显示</span>
-            </label>
-          </div>
-          <div className="spec-grid">
-            <ColorControl label="文字色" value={template.button?.textColor || defaultButtonStyle.textColor} onChange={(textColor) => updateButton({ textColor })} />
-            <ColorControl label="底色 1" value={template.button?.bgFrom || defaultButtonStyle.bgFrom} onChange={(bgFrom) => updateButton({ bgFrom })} />
-            <ColorControl label="底色 2" value={template.button?.bgTo || defaultButtonStyle.bgTo} onChange={(bgTo) => updateButton({ bgTo })} />
-            <SpecNumber label="字号" min={12} value={template.button?.fs || 24} onChange={(fs) => updateButton({ fs })} />
-            <SpecNumber label="宽" value={template.button?.w || 140} onChange={(w) => updateButton({ w })} />
-            <SpecNumber label="高" value={template.button?.h || 42} onChange={(h) => updateButton({ h })} />
-            <SpecNumber label="X" value={template.button?.x || 40} onChange={(x) => updateButton({ x })} />
-            <SpecNumber label="Y" value={template.button?.y || 160} onChange={(y) => updateButton({ y })} />
-          </div>
+          <div className="spec-section-head"><strong>布局信息</strong></div>
+          <p className="zone-info">
+            {isPortrait
+              ? `竖版 ${template.width}×${template.height}，标题在上部居中，视觉元素自然分布`
+              : `横版 ${template.width}×${template.height}，标题在左侧居中，视觉元素自然分布`}
+          </p>
+          <p className="zone-info">画面统一连贯，无区域分割</p>
         </section>
 
         <section className="spec-section add-template">
-          <div className="spec-section-head">
-            <strong>新增模板</strong>
-          </div>
+          <div className="spec-section-head"><strong>新增模板</strong></div>
           <div className="spec-grid">
             <label className="spec-number text-input">
               <span>名称</span>
-              <input value={newTemplate.label} onChange={(event) => setNewTemplate((current) => ({ ...current, label: event.target.value }))} />
+              <input value={newTemplate.label} onChange={(event) => setNewTemplate((c) => ({ ...c, label: event.target.value }))} />
             </label>
             <label className="spec-number text-input">
               <span>类型</span>
-              <input value={newTemplate.type} onChange={(event) => setNewTemplate((current) => ({ ...current, type: event.target.value }))} />
+              <input value={newTemplate.type} onChange={(event) => setNewTemplate((c) => ({ ...c, type: event.target.value }))} />
             </label>
-            <SpecNumber label="宽" min={120} value={newTemplate.width} onChange={(width) => setNewTemplate((current) => ({ ...current, width }))} />
-            <SpecNumber label="高" min={120} value={newTemplate.height} onChange={(height) => setNewTemplate((current) => ({ ...current, height }))} />
+            <SpecNumber label="宽" min={120} value={newTemplate.width} onChange={(w) => setNewTemplate((c) => ({ ...c, width: w }))} />
+            <SpecNumber label="高" min={120} value={newTemplate.height} onChange={(h) => setNewTemplate((c) => ({ ...c, height: h }))} />
           </div>
           <button className="soft-button full-width" type="button" onClick={() => onAdd(newTemplate)}>
-            复制当前规范新增
+            新增模板
           </button>
         </section>
       </aside>
@@ -1061,11 +892,9 @@ function TemplateSpecDrawer({ fields, image, onAdd, onClose, onSelect, onUpdate,
 
 function PromptSettings({
   customImageModel,
-  currentTestLabel,
   generatedAt,
   generationError,
   generationErrorDetail,
-  generationTask,
   generatedModel,
   imageModel,
   isGenerating,
@@ -1074,7 +903,6 @@ function PromptSettings({
   onGenerate,
   onImageModelChange,
   onModelConfigChange,
-  onTestGenerate,
   onPromptChange,
   onReferenceChange,
   prompt,
@@ -1103,7 +931,7 @@ function PromptSettings({
       <div className="section-head">
         <div>
           <h2>AI 生图设置</h2>
-          <p>基于主副标题生成氛围图，不在图片中生成文字</p>
+          <p>一步到位：氛围图 + 文字排版一起生成</p>
         </div>
       </div>
 
@@ -1146,27 +974,21 @@ function PromptSettings({
       </div>
 
       <div className="prompt-actions">
-        <button className="soft-button" type="button" disabled={isGenerating} onClick={onTestGenerate}>
-          {isGenerating && generationTask === "test" ? "测试中..." : "测试单张"}
-        </button>
         <button className="primary-button" type="button" disabled={isGenerating} onClick={onGenerate}>
-          {isGenerating && generationTask === "batch" ? "生成中..." : "生成"}
+          {isGenerating ? "生成中..." : "生成"}
         </button>
       </div>
-      <div className="test-target-note">测试单张会生成：{currentTestLabel}</div>
 
       <div className={`prompt-hint ${generationError ? "error" : ""}`}>
         {generationError
           ? `生成失败：${generationError}`
           : isGenerating
-          ? generationTask === "test"
-            ? `正在测试 ${currentTestLabel}，确认模型能否返回可用图片。`
-            : "正在逐张生成 6 个尺寸的适配图，图片模型通常需要等待几十秒到数分钟。"
-          : promptDirty
-            ? "提示词已修改，点击「生成」后再更新多尺寸预览。"
-            : generatedAt
-              ? `已生成：${generatedAt}${generatedModel ? `，模型：${generatedModel}` : ""}`
-              : "当前会为每个尺寸生成独立构图，并避开模板文字安全区。"}
+            ? "正在逐张生成 6 个尺寸的适配图，图片模型通常需要等待几十秒到数分钟。"
+            : promptDirty
+              ? "提示词已修改，点击「生成」后再更新多尺寸预览。"
+              : generatedAt
+                ? `已生成：${generatedAt}${generatedModel ? `，模型：${generatedModel}` : ""}`
+                : "当前会为每个尺寸生成独立构图，并避开模板文字安全区。"}
         {generationErrorDetail ? (
           <details className="error-debug" open>
             <summary>原始接口返回</summary>
@@ -1205,48 +1027,7 @@ function OriginalPreviewModal({ fields, image, onBgChange, onBgZoomChange, onClo
           <PreviewCanvas fields={fields} image={image} original template={template} />
         </div>
 
-        <div className="position-controls">
-          <label className="control-row">
-            <span>氛围图横向位置 {Math.round(bg.x)}%</span>
-            <input
-              max="100"
-              min="0"
-              step="1"
-              type="range"
-              value={bg.x}
-              onInput={(event) => onBgChange(Number(event.currentTarget.value), bg.y)}
-              onChange={(event) => onBgChange(Number(event.target.value), bg.y)}
-            />
-          </label>
-          <label className="control-row">
-            <span>氛围图纵向位置 {Math.round(bg.y)}%</span>
-            <input
-              max="100"
-              min="0"
-              step="1"
-              type="range"
-              value={bg.y}
-              onInput={(event) => onBgChange(bg.x, Number(event.currentTarget.value))}
-              onChange={(event) => onBgChange(bg.x, Number(event.target.value))}
-            />
-          </label>
-          <label className="control-row">
-            <span>氛围图缩放 {Math.round(zoom * 100)}%</span>
-            <input
-              max="160"
-              min="100"
-              step="1"
-              type="range"
-              value={Math.round(zoom * 100)}
-              onInput={(event) => onBgZoomChange(Number(event.currentTarget.value) / 100)}
-              onChange={(event) => onBgZoomChange(Number(event.target.value) / 100)}
-            />
-          </label>
-          <button className="soft-button" type="button" onClick={() => {
-            onBgChange(50, 50);
-            onBgZoomChange(DEFAULT_BG_ZOOM);
-          }}>居中氛围图</button>
-        </div>
+        {/* 横向/纵向/缩放控件已删除 */}
 
         <details className="size-prompt">
           <summary>查看该尺寸生图提示词</summary>
@@ -1258,9 +1039,7 @@ function OriginalPreviewModal({ fields, image, onBgChange, onBgZoomChange, onClo
 }
 
 function EditDrawer({ template, fields, image, onClose }) {
-  const [safeArea, setSafeArea] = useState(true);
-  const [layerBounds, setLayerBounds] = useState(false);
-  const [visualOffset, setVisualOffset] = useState(48);
+  const [showZones, setShowZones] = useState(true);
 
   return (
     <div className="drawer-backdrop">
@@ -1275,37 +1054,21 @@ function EditDrawer({ template, fields, image, onClose }) {
 
         <div className="drawer-preview">
           <BannerPreview template={template} fields={fields} image={image} compact />
-          {safeArea && <div className="safe-area-note">安全区已显示</div>}
-          {layerBounds && <div className="safe-area-note second">文字框已显示</div>}
+          {showZones && <div className="safe-area-note">分区已显示</div>}
         </div>
 
         <div className="quick-list">
-          <label className="control-row">
-            <span>主视觉位置</span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={visualOffset}
-              onChange={(event) => setVisualOffset(event.target.value)}
-            />
-          </label>
           <label className="check-row">
-            <input checked={safeArea} onChange={(event) => setSafeArea(event.target.checked)} type="checkbox" />
-            <span>显示安全区</span>
-          </label>
-          <label className="check-row">
-            <input checked={layerBounds} onChange={(event) => setLayerBounds(event.target.checked)} type="checkbox" />
-            <span>显示文字边界</span>
+            <input checked={showZones} onChange={(event) => setShowZones(event.target.checked)} type="checkbox" />
+            <span>显示文字/视觉分区</span>
           </label>
         </div>
 
         <details className="advanced">
           <summary>高级设置</summary>
           <div className="advanced-grid">
-            <label>标题字号 <input value={`${template.title.fs}px`} readOnly /></label>
-            <label>副标题字号 <input value={`${template.subtitle.fs}px`} readOnly /></label>
-            <label>按钮状态 <input value={template.showButton ? "显示" : "隐藏"} readOnly /></label>
+            <label>尺寸 <input value={`${template.width}x${template.height}px`} readOnly /></label>
+            <label>类型 <input value={template.type} readOnly /></label>
             <label>Logo 状态 <input value={template.showLogo ? "显示" : "隐藏"} readOnly /></label>
           </div>
         </details>
@@ -1390,27 +1153,49 @@ export function App() {
   const [fields, setFields] = useState({
     title: "首波福利",
     subtitle: "全场品牌省10%",
-    buttonText: "立即开通",
     activityTime: "5.27 - 6.3",
   });
   const [selectedSize, setSelectedSize] = useState(defaultTemplates[2].key);
+  const activeTemplate = templates.find((t) => t.key === selectedSize) || templates[0];
   const [generationRound, setGenerationRound] = useState(0);
   const [generatedSet, setGeneratedSet] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generationTask, setGenerationTask] = useState("");
   const [promptDirty, setPromptDirty] = useState(false);
   const [generatedAt, setGeneratedAt] = useState("");
   const [generatedModel, setGeneratedModel] = useState("");
   const [generationError, setGenerationError] = useState("");
   const [generationErrorDetail, setGenerationErrorDetail] = useState("");
-  const [imageModel, setImageModel] = useState("openai/gpt-5.4-image-2");
+  const [imageModel, setImageModel] = useState("qwen-image-2.0");
   const [customImageModel, setCustomImageModel] = useState("");
-  const [referenceImage, setReferenceImage] = useState(null);
+  const [referenceImage, setReferenceImage] = useState(() => {
+    // 从 localStorage 恢复参考图
+    try {
+      const saved = localStorage.getItem("banner_ref_image");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // 参考图变更时持久化到 localStorage
+  function handleReferenceChange(image) {
+    setReferenceImage(image);
+    if (image) {
+      localStorage.setItem("banner_ref_image", JSON.stringify(image));
+    } else {
+      localStorage.removeItem("banner_ref_image");
+    }
+  }
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [originalOpen, setOriginalOpen] = useState(false);
   const [specOpen, setSpecOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [modelConfigId, setModelConfigId] = useState("");
+
+  // ---- Template management ----
+  const [activityTemplates, setActivityTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   // ---- PocketBase state ----
   const [project, setProject] = useState(null);
@@ -1418,12 +1203,13 @@ export function App() {
   const [iteration, setIteration] = useState(null);
   const [iterations, setIterations] = useState([]);
   const [savedResults, setSavedResults] = useState(null);
+  const [historyAdaptiveSet, setHistoryAdaptiveSet] = useState(null);
+  const [historySummary, setHistorySummary] = useState(null);
   const [prompt, setPrompt] = useState(
     "电商促销氛围图，紫色和蓝色科技风格，卡券元素、3D 渲染、光效舞台、金色金币和红包 floating，动感粒子，未来感灯光；不要生成文字、数字、Logo 或水印。",
   );
 
-  const activeTemplate = templates.find((item) => item.key === selectedSize) || templates[0];
-  const activeAdaptiveImageSet = generatedSet?.templateImages || adaptiveImageSets[generationRound % adaptiveImageSets.length];
+  const activeAdaptiveImageSet = historyAdaptiveSet || generatedSet?.templateImages || adaptiveImageSets[generationRound % adaptiveImageSets.length];
   const selectedImageModel = imageModel === "custom" ? customImageModel.trim() : imageModel;
   const selectedApiMode = imageModelOptions.find((option) => option.value === imageModel)?.apiMode || inferApiModeForModel(selectedImageModel);
 
@@ -1448,6 +1234,94 @@ export function App() {
     setGenerationErrorDetail("");
   }
 
+  // ---- Template helpers ----
+
+  function loadTemplates() {
+    listActivityTemplates().then((data) => {
+      setActivityTemplates(data.templates || []);
+    }).catch(() => {});
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
+  useEffect(() => { loadTemplates(); }, []);
+
+  /* 切换任务时清空历史图片 */
+  useEffect(() => {
+    setHistoryAdaptiveSet(null);
+  }, [task]);
+
+  /* 迭代切换 / 页面刷新时自动恢复已保存的生成结果 */
+  useEffect(() => {
+    if (!iteration) {
+      setGeneratedSet(null);
+      setSavedResults(null);
+      return;
+    }
+    getIterationResults(iteration.id).then((data) => {
+      setSavedResults(data);
+      const results = data.results || [];
+      if (results.length > 0) {
+        const templateImages = {};
+        results.forEach((r) => {
+          if (r.sizeKey) templateImages[r.sizeKey] = r.imageUrl;
+        });
+        setGeneratedSet({
+          generatedCandidates: [],
+          templateImages,
+        });
+        if (results[0].modelUsed) setGeneratedModel(results[0].modelUsed);
+        setGenerationRound((c) => c + 1);
+      }
+    }).catch(() => {
+      // 没有历史结果，忽略
+    });
+  }, [iteration]);
+
+  function applyTemplate(tmpl) {
+    setSelectedTemplateId(tmpl.id);
+    if (tmpl.title !== undefined) updateField("title", tmpl.title || "");
+    if (tmpl.subtitle !== undefined) updateField("subtitle", tmpl.subtitle || "");
+    if (tmpl.activity_time !== undefined) updateField("activityTime", tmpl.activity_time || "");
+    if (tmpl.prompt) updatePrompt(tmpl.prompt);
+    if (tmpl.image_model) updateImageModel(tmpl.image_model);
+  }
+
+  async function handleSaveTemplate() {
+    if (savingTemplate) return;
+    setSavingTemplate(true);
+    try {
+      const saved = await saveActivityTemplate({
+        id: selectedTemplateId || undefined,
+        name: `${fields.title || "未命名"}-${fields.subtitle || ""}`,
+        title: fields.title,
+        subtitle: fields.subtitle,
+        button_text: fields.buttonText,
+        activity_time: fields.activityTime,
+        prompt,
+        image_model: selectedImageModel,
+      });
+      if (!selectedTemplateId) {
+        setSelectedTemplateId(saved.id);
+      }
+      loadTemplates();
+    } catch (e) {
+      console.error("保存模板失败", e);
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
+
+  async function handleDeleteTemplate() {
+    if (!selectedTemplateId) return;
+    try {
+      await deleteActivityTemplate(selectedTemplateId);
+      setSelectedTemplateId("");
+      loadTemplates();
+    } catch (e) {
+      console.error("删除模板失败", e);
+    }
+  }
+
   function updateCustomImageModel(value) {
     setCustomImageModel(value);
     setGenerationError("");
@@ -1462,7 +1336,39 @@ export function App() {
     setGenerationError("");
   }
 
-  async function generateAtmosphereImages({ testSingle = false } = {}) {
+  // 无后端/无迭代时保存结果到 localStorage
+  function saveResultsToLocalStorage(results) {
+    try {
+      const record = {
+        title: fields.title,
+        subtitle: fields.subtitle,
+        prompt,
+        model: selectedImageModel,
+        apiMode: selectedApiMode,
+        generatedAt: new Date().toISOString(),
+        results: results.map((r) => ({
+          key: r.key,
+          label: r.label,
+          src: r.src,
+          width: r.width,
+          height: r.height,
+          size: r.size,
+          promptUsed: r.promptUsed,
+          modelUsed: r.modelUsed,
+        })),
+      };
+      const history = JSON.parse(localStorage.getItem("banner_gen_history") || "[]");
+      history.unshift(record);
+      // 最多保留 20 条历史
+      if (history.length > 20) history.length = 20;
+      localStorage.setItem("banner_gen_history", JSON.stringify(history));
+      console.log(`已保存 ${results.length} 张图到本地历史`);
+    } catch (e) {
+      console.warn("本地保存失败", e);
+    }
+  }
+
+  async function generateAtmosphereImages() {
     if (isGenerating) return;
     if (!selectedImageModel) {
       setGenerationError("请先选择或输入生图模型");
@@ -1470,81 +1376,97 @@ export function App() {
     }
 
     setIsGenerating(true);
-    setGenerationTask(testSingle ? "test" : "batch");
     setGenerationError("");
     setGenerationErrorDetail("");
 
-    const testTemplate = templates.find((template) => template.key === selectedSize) || templates[0];
-    const jobs = testSingle
-      ? [{
-        key: testTemplate.key,
-        label: testTemplate.label,
-        width: testTemplate.width,
-        height: testTemplate.height,
-        prompt: templatePrompt(testTemplate, fields, prompt),
-      }]
-      : templates.map((template) => ({
-        key: template.key,
-        label: template.label,
-        width: template.width,
-        height: template.height,
-        prompt: templatePrompt(template, fields, prompt),
-      }));
+    const jobs = templates.map((template) => ({
+      key: template.key,
+      label: template.label,
+      width: template.width,
+      height: template.height,
+      title: fields.title,
+      subtitle: fields.subtitle,
+      prompt: templatePrompt(template, fields, prompt),
+    }));
 
-    try {
-      const { results } = await generateImages({
-        jobs,
-        model: selectedImageModel,
-        apiMode: selectedApiMode,
-        modelConfigId,
-        referenceImage: referenceImage?.src ? { name: referenceImage.name, src: referenceImage.src } : undefined,
-      });
+    // 先初始化空结果，让每张图边到边渲染
+    const initialImages = {};
+    jobs.forEach((j) => { initialImages[j.key] = null; });
+    setGeneratedSet({
+      generatedCandidates: [],
+      templateImages: initialImages,
+    });
 
-      const templateImages = {};
-      results.forEach((r) => {
-        templateImages[r.key] = r.src;
-      });
+    const allResults = [];
+    let firstModel = "";
+    let errorCount = 0;
+    const totalJobs = jobs.length;
 
-      const nextGeneratedSet = testSingle
-        ? {
-          generatedCandidates: generatedSet?.generatedCandidates || [],
-          templateImages: { ...(generatedSet?.templateImages || {}), ...templateImages },
+    generateImagesStream({
+      jobs,
+      model: selectedImageModel,
+      apiMode: selectedApiMode,
+      modelConfigId,
+      iterationId: iteration?.id,
+      referenceImage: referenceImage?.src ? { name: referenceImage.name, src: referenceImage.src } : undefined,
+      onResult: (result) => {
+        allResults.push(result);
+        if (!firstModel) firstModel = result.modelUsed || selectedImageModel;
+
+        setGeneratedSet((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev.templateImages, [result.key]: result.src };
+          return { ...prev, templateImages: updated };
+        });
+
+        const completed = allResults.length + errorCount;
+        if (completed < totalJobs) {
+          setGenerationErrorDetail(`${completed + 1}/${totalJobs} 生成中...`);
         }
-        : {
-          generatedCandidates: [],
-          templateImages,
-        };
+      },
+      onError: (msg, key) => {
+        errorCount++;
+        console.error(`生图失败 [${key}]:`, msg);
+        const completed = allResults.length + errorCount;
+        setGenerationErrorDetail(`${key} 失败: ${msg}（${completed}/${totalJobs}）`);
+      },
+      onDone: () => {
+        setIsGenerating(false);
+        setGenerationRound((c) => c + 1);
+        setGeneratedModel(firstModel || selectedImageModel);
+        setPromptDirty(false);
+        setGeneratedAt(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }));
+        setGenerationErrorDetail("");
 
-      setGeneratedSet(nextGeneratedSet);
-      setGenerationRound((c) => c + 1);
-      setGeneratedModel(results[0]?.modelUsed || selectedImageModel);
-      setPromptDirty(false);
-      setGeneratedAt(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }));
+        if (errorCount > 0) {
+          setGenerationError(`${allResults.length}/${totalJobs} 张成功，${errorCount} 张失败`);
+        } else {
+          setGenerationError("");
+        }
 
-      if (iteration && !testSingle) {
-        try {
-          const saved = await saveGeneration({
+        if (iteration && allResults.length > 0) {
+          saveGeneration({
             iterationId: iteration.id,
             title: fields.title,
             subtitle: fields.subtitle,
-            buttonText: fields.buttonText,
             activityTime: fields.activityTime,
             prompt,
             imageModel: selectedImageModel,
             apiMode: selectedApiMode,
-            results,
+            results: allResults,
+          }).then((saved) => {
+            setSavedResults(saved);
+          }).catch((saveErr) => {
+            console.warn("自动保存失败 (PocketBase 未启动?)", saveErr);
+            // 无后端时保存到 localStorage
+            saveResultsToLocalStorage(allResults);
           });
-          setSavedResults(saved);
-        } catch (saveErr) {
-          console.warn("自动保存失败 (PocketBase 未启动?)", saveErr);
+        } else if (!iteration && allResults.length > 0) {
+          // 无迭代时保存到 localStorage
+          saveResultsToLocalStorage(allResults);
         }
-      }
-    } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : "图片生成失败");
-    } finally {
-      setIsGenerating(false);
-      setGenerationTask("");
-    }
+      },
+    });
   }
 
   function openOriginalPreview(key) {
@@ -1570,36 +1492,12 @@ export function App() {
     }));
   }
 
-  function scaleLayer(layer, scaleX, scaleY, fontScale) {
-    const nextLayer = {
-      ...layer,
-      x: Math.round(layer.x * scaleX),
-      y: Math.round(layer.y * scaleY),
-      w: Math.round(layer.w * scaleX),
-      h: Math.round(layer.h * scaleY),
-    };
-
-    if (layer.fs) {
-      nextLayer.fs = Math.max(10, Math.round(layer.fs * fontScale));
-    }
-
-    if (layer.lh) {
-      nextLayer.lh = Math.max(12, Math.round(layer.lh * fontScale));
-    }
-
-    return nextLayer;
-  }
-
   function addTemplate(spec) {
     const base = activeTemplate;
     const width = Number(spec.width) || base.width;
     const height = Number(spec.height) || base.height;
-    const scaleX = width / base.width;
-    const scaleY = height / base.height;
-    const fontScale = Math.min(scaleX, scaleY);
     const sameSizeCount = templates.filter((item) => item.width === width && item.height === height).length + 1;
     const key = `${width}x${height}-custom-${sameSizeCount}`;
-    const scaledButton = base.button ? scaleLayer(base.button, scaleX, scaleY, fontScale) : undefined;
 
     const nextTemplate = {
       ...base,
@@ -1609,15 +1507,61 @@ export function App() {
       width,
       height,
       status: "建议检查",
-      title: scaleLayer(base.title, scaleX, scaleY, fontScale),
-      subtitle: scaleLayer(base.subtitle, scaleX, scaleY, fontScale),
-      button: scaledButton,
-      bgZoom: backgroundZoom(base),
-      time: scaleLayer(base.time, scaleX, scaleY, fontScale),
+      bg: "50% 50%",
+      bgZoom: DEFAULT_BG_ZOOM,
     };
 
     setTemplates((current) => [...current, nextTemplate]);
     setSelectedSize(key);
+  }
+
+  const [addSizeOpen, setAddSizeOpen] = useState(false);
+  const [newSize, setNewSize] = useState({ label: "", width: 720, height: 320 });
+
+  function handleAddSize() {
+    const w = Number(newSize.width) || 720;
+    const h = Number(newSize.height) || 320;
+    const label = newSize.label.trim() || `${w} x ${h}`;
+    const base = activeTemplate;
+    const sameCount = templates.filter((t) => t.width === w && t.height === h).length + 1;
+    const key = `${w}x${h}-custom-${sameCount}`;
+
+    setTemplates((current) => [
+      ...current,
+      {
+        ...base,
+        key,
+        label,
+        type: "自定义",
+        width: w,
+        height: h,
+        status: "建议检查",
+        bg: "50% 50%",
+        bgZoom: 1.1,
+      },
+    ]);
+    setSelectedSize(key);
+    setNewSize({ label: "", width: 720, height: 320 });
+  }
+
+  function handleHistoryLoad(results, summary) {
+    if (results === null && summary) {
+      /* 版本对比：显示汇总弹窗 */
+      setHistorySummary(summary);
+      return;
+    }
+    // Clear summary when viewing single iteration
+    setHistorySummary(null);
+    if (!results || results.length === 0) {
+      setHistoryAdaptiveSet(null);
+      return;
+    }
+    /* results: [{sizeKey, imageUrl, width, height}, ...] */
+    const imageSet = {};
+    results.forEach((r) => {
+      imageSet[r.sizeKey] = r.imageUrl;
+    });
+    setHistoryAdaptiveSet(imageSet);
   }
 
   return (
@@ -1631,6 +1575,7 @@ export function App() {
         setIteration={setIteration}
         iterations={iterations}
         setIterations={setIterations}
+        onHistoryLoad={handleHistoryLoad}
       />
 
       <div className="workspace">
@@ -1646,40 +1591,31 @@ export function App() {
             <div className="form-grid">
               <label className="field">
                 <span>主标题</span>
-                <input data-testid="title-input" value={fields.title} maxLength={6} onChange={(event) => updateField("title", event.target.value)} />
-                <small>{fields.title.length} / 6</small>
+                <input data-testid="title-input" value={fields.title} onChange={(event) => updateField("title", event.target.value)} />
               </label>
               <label className="field">
                 <span>副标题</span>
-                <input data-testid="subtitle-input" value={fields.subtitle} maxLength={12} onChange={(event) => updateField("subtitle", event.target.value)} />
-                <small>{fields.subtitle.length} / 12</small>
-              </label>
-              <label className="field">
-                <span>按钮文案</span>
-                <input data-testid="button-input" value={fields.buttonText} maxLength={4} onChange={(event) => updateField("buttonText", event.target.value)} />
-                <small>{fields.buttonText.length} / 4</small>
+                <input data-testid="subtitle-input" value={fields.subtitle} onChange={(event) => updateField("subtitle", event.target.value)} />
               </label>
             </div>
           </section>
 
           <PromptSettings
             customImageModel={customImageModel}
-            currentTestLabel={activeTemplate.label}
             generatedAt={generatedAt}
             generationError={generationError}
             generationErrorDetail={generationErrorDetail}
-            generationTask={generationTask}
             generatedModel={generatedModel}
             imageModel={imageModel}
             isGenerating={isGenerating}
             modelConfigId={modelConfigId}
+
             onCustomImageModelChange={updateCustomImageModel}
             onGenerate={generateAtmosphereImages}
             onImageModelChange={updateImageModel}
             onModelConfigChange={setModelConfigId}
-            onTestGenerate={() => generateAtmosphereImages({ testSingle: true })}
             onPromptChange={updatePrompt}
-            onReferenceChange={setReferenceImage}
+            onReferenceChange={handleReferenceChange}
             prompt={prompt}
             promptDirty={promptDirty}
             referenceImage={referenceImage}
@@ -1700,7 +1636,8 @@ export function App() {
               <p>6 个尺寸同级展示</p>
             </div>
             <div className="preview-actions">
-              <span className="summary-chip">6 张尺寸图</span>
+              <span className="summary-chip">{templates.length} 张尺寸图</span>
+              <button className="soft-button" type="button" onClick={() => setAddSizeOpen(true)}>+ 添加尺寸</button>
               <button className="soft-button" type="button" onClick={() => setSpecOpen(true)}>调整模板</button>
               <button className="primary-button" data-testid="quality-button" type="button" onClick={() => setQualityOpen(true)}>批量下载</button>
             </div>
@@ -1715,9 +1652,52 @@ export function App() {
                 onClick={() => openOriginalPreview(template.key)}
                 selected={template.key === activeTemplate.key}
                 template={template}
+
               />
             ))}
           </div>
+
+          {addSizeOpen && (
+            <div className="add-size-overlay" onClick={() => setAddSizeOpen(false)}>
+              <div className="add-size-form" onClick={(e) => e.stopPropagation()}>
+                <div className="add-size-row">
+                  <label>
+                    <span>名称</span>
+                    <input
+                      placeholder="如 720x320"
+                      value={newSize.label}
+                      onChange={(e) => setNewSize((c) => ({ ...c, label: e.target.value }))}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddSize()}
+                    />
+                  </label>
+                  <label>
+                    <span>宽 (px)</span>
+                    <input
+                      type="number"
+                      min="120"
+                      value={newSize.width}
+                      onChange={(e) => setNewSize((c) => ({ ...c, width: Number(e.target.value) }))}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddSize()}
+                    />
+                  </label>
+                  <label>
+                    <span>高 (px)</span>
+                    <input
+                      type="number"
+                      min="120"
+                      value={newSize.height}
+                      onChange={(e) => setNewSize((c) => ({ ...c, height: Number(e.target.value) }))}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddSize()}
+                    />
+                  </label>
+                  <div className="add-size-actions">
+                    <button className="primary-button" type="button" onClick={handleAddSize}>添加</button>
+                    <button className="soft-button" type="button" onClick={() => setAddSizeOpen(false)}>取消</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <p className="preview-note">
             {generatedSet
@@ -1736,6 +1716,7 @@ export function App() {
             onClose={() => setOriginalOpen(false)}
             prompt={prompt}
             template={activeTemplate}
+
           />
       )}
       {drawerOpen && <EditDrawer fields={fields} image={imageForTemplate(activeTemplate)} onClose={() => setDrawerOpen(false)} template={activeTemplate} />}
@@ -1746,12 +1727,34 @@ export function App() {
           onAdd={addTemplate}
           onClose={() => setSpecOpen(false)}
           onSelect={setSelectedSize}
-          onUpdate={updateTemplate}
           selectedKey={selectedSize}
           templates={templates}
         />
       )}
       {qualityOpen && <QualitySheet fields={fields} imageForTemplate={imageForTemplate} onClose={() => setQualityOpen(false)} templates={templates} />}
+
+      {historySummary && (
+        <HistoryPanel
+          iterations={historySummary}
+          taskId={task?.id}
+          onClose={() => setHistorySummary(null)}
+          onSelectIteration={(iterId) => {
+            const it = iterations.find((i) => i.id === iterId);
+            if (it) {
+              setIteration(it);
+              getIterationResults(iterId).then((data) => {
+                setHistoryAdaptiveSet(null);
+                if (data.results?.length) {
+                  const imageSet = {};
+                  data.results.forEach((r) => { imageSet[r.sizeKey] = r.imageUrl; });
+                  setHistoryAdaptiveSet(imageSet);
+                }
+              }).catch(() => {});
+            }
+            setHistorySummary(null);
+          }}
+        />
+      )}
     </main>
   );
 }

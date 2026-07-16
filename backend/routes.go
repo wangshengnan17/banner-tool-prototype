@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +18,11 @@ func registerRoutes(e *core.ServeEvent) {
 	e.Router.POST("/api/custom/iterations/next", handleCreateNextIteration)
 	e.Router.POST("/api/custom/iterations/{id}/mark-best", handleMarkBestIteration)
 	e.Router.POST("/api/custom/generations/save", handleSaveGeneration)
+	e.Router.GET("/api/custom/iterations/{id}/results", handleIterationResults)
+	e.Router.GET("/api/custom/tasks/{taskId}/iterations-summary", handleIterationsSummary)
+	e.Router.GET("/api/custom/activity-templates", handleListActivityTemplates)
+	e.Router.POST("/api/custom/activity-templates", handleSaveActivityTemplate)
+	e.Router.DELETE("/api/custom/activity-templates/{id}", handleDeleteActivityTemplate)
 }
 
 func readJSON(r *http.Request) (map[string]any, error) {
@@ -122,6 +129,90 @@ func handleGenerateImages(re *core.RequestEvent) error {
 		req.ApiMode = inferApiMode(req.Model)
 	}
 
+	// dashscope-wan 模式：通过兼容代理的 /images/generations 端点（OpenAI Images API 格式）
+	// hupan 等代理将 DashScope Key 转为 OpenAI 兼容的 Images API
+	if req.ApiMode == "dashscope-wan" && !strings.Contains(baseUrl, "dashscope.aliyuncs.com") {
+		log.Printf("[route] dashscope-wan 通过代理走 images 模式 (baseUrl=%s)", baseUrl)
+		req.ApiMode = "images"
+	}
+
+	// SSE 流式模式
+	useStream := re.Request.URL.Query().Get("stream") == "1"
+	if useStream {
+		w := re.Response
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			return apiError(re, 500, "SSE 不支持")
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(200)
+		flusher.Flush()
+
+		// 从请求体读取 iterationId（前端传入，用于持久化）
+		iterationId, _ := body["iterationId"].(string)
+
+		// 先发一个 init 事件告知总数
+		initData, _ := json.Marshal(map[string]any{
+			"type":        "init",
+			"total":       len(req.Jobs),
+			"model":       req.Model,
+			"iterationId": iterationId,
+		})
+		fmt.Fprintf(w, "data: %s\n\n", string(initData))
+		flusher.Flush()
+
+		// 如果有迭代ID，创建 generation_config 记录
+		var configId string
+		if iterationId != "" {
+			configId, _ = createGenConfig(re.App, iterationId, body)
+		}
+
+		generateAllImagesStream(req, apiKey, baseUrl,
+			func(result GenerateResult) {
+				// 每完成一张图，立刻保存到 PocketBase
+				if configId != "" {
+					saveGenResult(re.App, configId, iterationId, result)
+				}
+
+				data, _ := json.Marshal(map[string]any{
+					"type":   "result",
+					"result": result,
+				})
+				fmt.Fprintf(w, "data: %s\n\n", string(data))
+				flusher.Flush()
+			},
+			func(key string, genErr error) {
+				data, _ := json.Marshal(map[string]any{
+					"type":  "error",
+					"key":   key,
+					"error": genErr.Error(),
+				})
+				fmt.Fprintf(w, "data: %s\n\n", string(data))
+				flusher.Flush()
+			},
+		)
+
+		// 标记迭代状态
+		if iterationId != "" && configId != "" {
+			updateIterationStatus(re.App, iterationId, "generated")
+		}
+
+		// 发送结束事件（带 configId）
+		endPayload := map[string]any{"type": "done"}
+		if configId != "" {
+			endPayload["configId"] = configId
+		}
+		endData, _ := json.Marshal(endPayload)
+		fmt.Fprintf(w, "data: %s\n\n", string(endData))
+		flusher.Flush()
+		return nil
+	}
+
+	// 兼容旧的非流式模式
 	results, genErr := generateAllImages(req, apiKey, baseUrl)
 	if genErr != nil {
 		return apiError(re, 500, genErr.Error())
@@ -237,6 +328,7 @@ func handleCreateNextIteration(re *core.RequestEvent) error {
 
 	collection, _ := app.FindCollectionByNameOrId("iterations")
 	record := core.NewRecord(collection)
+	record.Set("owner", re.Auth.Id) // 从认证信息中获取当前用户
 	record.Set("task", taskId)
 	record.Set("version", nextVersion)
 	record.Set("status", "draft")
@@ -402,4 +494,194 @@ func handleSaveGeneration(re *core.RequestEvent) error {
 		"iterationId":     iterationId,
 		"iterationStatus": "generated",
 	})
+}
+
+// ---- GET /api/custom/activity-templates ----
+
+func handleListActivityTemplates(re *core.RequestEvent) error {
+	records, err := re.App.FindRecordsByFilter(
+		"activity_templates",
+		"",
+		"-sort_order",
+		100, 0,
+	)
+	if err != nil {
+		return apiError(re, 500, "查询模板失败")
+	}
+
+	result := make([]map[string]any, len(records))
+	for i, r := range records {
+		result[i] = map[string]any{
+			"id":            r.Id,
+			"name":          r.GetString("name"),
+			"title":         r.GetString("title"),
+			"subtitle":      r.GetString("subtitle"),
+			"button_text":   r.GetString("button_text"),
+			"activity_time": r.GetString("activity_time"),
+			"prompt":        r.GetString("prompt"),
+			"image_model":   r.GetString("image_model"),
+			"sort_order":    r.GetInt("sort_order"),
+		}
+	}
+	return writeJSON(re, 200, map[string]any{"templates": result})
+}
+
+// ---- POST /api/custom/activity-templates ----
+
+func handleSaveActivityTemplate(re *core.RequestEvent) error {
+	body, err := readJSON(re.Request)
+	if err != nil {
+		return apiError(re, 400, "请求体格式错误")
+	}
+
+	app := re.App
+
+	// Get authenticated user ID
+	authRecord := re.Auth
+	ownerId := ""
+	if authRecord != nil {
+		ownerId = authRecord.Id
+	}
+
+	id, _ := body["id"].(string)
+	var record *core.Record
+
+	if id != "" {
+		record, err = app.FindRecordById("activity_templates", id)
+		if err != nil {
+			return apiError(re, 404, "模板不存在")
+		}
+	} else {
+		collection, _ := app.FindCollectionByNameOrId("activity_templates")
+		record = core.NewRecord(collection)
+
+		// Set owner
+		if ownerId != "" {
+			record.Set("owner", ownerId)
+		}
+
+		existing, findErr := app.FindRecordsByFilter("activity_templates", "", "-sort_order", 1, 0)
+		if findErr == nil && len(existing) > 0 {
+			record.Set("sort_order", existing[0].GetInt("sort_order")+1)
+		} else {
+			record.Set("sort_order", 0)
+		}
+	}
+
+	if v, ok := body["name"].(string); ok && v != "" {
+		record.Set("name", v)
+	}
+	if v, ok := body["title"].(string); ok {
+		record.Set("title", v)
+	}
+	if v, ok := body["subtitle"].(string); ok {
+		record.Set("subtitle", v)
+	}
+	if v, ok := body["button_text"].(string); ok {
+		record.Set("button_text", v)
+	}
+	if v, ok := body["activity_time"].(string); ok {
+		record.Set("activity_time", v)
+	}
+	if v, ok := body["prompt"].(string); ok && v != "" {
+		record.Set("prompt", v)
+	}
+	if v, ok := body["image_model"].(string); ok {
+		record.Set("image_model", v)
+	}
+
+	if err := app.Save(record); err != nil {
+		return apiError(re, 500, "保存模板失败: "+err.Error())
+	}
+
+	status := 200
+	if id == "" {
+		status = 201
+	}
+	return writeJSON(re, status, map[string]any{
+		"id":            record.Id,
+		"name":          record.GetString("name"),
+		"title":         record.GetString("title"),
+		"subtitle":      record.GetString("subtitle"),
+		"button_text":   record.GetString("button_text"),
+		"activity_time": record.GetString("activity_time"),
+		"prompt":        record.GetString("prompt"),
+		"image_model":   record.GetString("image_model"),
+	})
+}
+
+// ---- DELETE /api/custom/activity-templates/{id} ----
+
+func handleDeleteActivityTemplate(re *core.RequestEvent) error {
+	id := re.Request.PathValue("id")
+	if id == "" {
+		return apiError(re, 400, "缺少模板ID")
+	}
+
+	record, err := re.App.FindRecordById("activity_templates", id)
+	if err != nil {
+		return apiError(re, 404, "模板不存在")
+	}
+
+	if err := re.App.Delete(record); err != nil {
+		return apiError(re, 500, "删除模板失败: "+err.Error())
+	}
+
+	return writeJSON(re, 200, map[string]any{"deleted": id})
+}
+
+// ---- 生成结果即时持久化 helper ----
+
+func createGenConfig(app core.App, iterationId string, body map[string]any) (string, error) {
+	collection, err := app.FindCollectionByNameOrId("generation_configs")
+	if err != nil {
+		return "", err
+	}
+	record := core.NewRecord(collection)
+	record.Set("iteration", iterationId)
+	if v, ok := body["title"].(string); ok {
+		record.Set("title", v)
+	}
+	if v, ok := body["subtitle"].(string); ok {
+		record.Set("subtitle", v)
+	}
+	if v, ok := body["prompt"].(string); ok {
+		record.Set("prompt", v)
+	}
+	if v, ok := body["model"].(string); ok {
+		record.Set("image_model", v)
+	}
+	if v, ok := body["apiMode"].(string); ok {
+		record.Set("api_mode", v)
+	}
+	if err := app.Save(record); err != nil {
+		return "", err
+	}
+	return record.Id, nil
+}
+
+func saveGenResult(app core.App, configId, iterationId string, result GenerateResult) {
+	collection, err := app.FindCollectionByNameOrId("generation_results")
+	if err != nil {
+		return
+	}
+	record := core.NewRecord(collection)
+	record.Set("config", configId)
+	record.Set("iteration", iterationId)
+	record.Set("size_key", result.Key)
+	record.Set("width", result.Width)
+	record.Set("height", result.Height)
+	record.Set("image", result.Src)
+	record.Set("prompt_used", result.PromptUsed)
+	record.Set("model_used", result.ModelUsed)
+	app.Save(record)
+}
+
+func updateIterationStatus(app core.App, iterationId, status string) {
+	record, err := app.FindRecordById("iterations", iterationId)
+	if err != nil {
+		return
+	}
+	record.Set("status", status)
+	app.Save(record)
 }
